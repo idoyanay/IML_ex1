@@ -131,6 +131,7 @@ class LinearRegression:
         MTM = M.T @ M
         MMT = M @ M.T
 
+        # Step 3: Compute the eigenvalues and eigenvectors of M^T * M
         eigvals_V, V = np.linalg.eigh(MTM)  # Right singular vectors
         eigvals_V = eigvals_V[::-1]  # Sort eigenvalues in descending order
         V = V[:, ::-1]  # Sort eigenvectors accordingly
