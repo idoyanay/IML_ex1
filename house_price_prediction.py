@@ -1,6 +1,8 @@
 
 
 import pandas as pd
+import numpy as np
+from typing import Tuple
 
 
 def preprocess_train(X: pd.DataFrame, y: pd.Series):
@@ -54,11 +56,39 @@ def feature_evaluation(X: pd.DataFrame, y: pd.Series, output_path: str = ".") ->
     pass
 
 
+
+def Q2(seed: int = 42) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Split the data into train and test sets. The test set should be 20% of the data.
+    Parameters
+    ----------
+    seed: int
+        Random seed for reproducibility
+    """
+    np.random.seed(seed)
+
+    # Shuffle the DataFrame rows
+    shuffled_df = df.sample(frac=1, random_state=42).reset_index(drop=True)
+
+    # Calculate the index to split at
+    split_index = int(0.75 * len(shuffled_df))
+
+    # Split the DataFrame
+    train_df = shuffled_df.iloc[:split_index]
+    test_df = shuffled_df.iloc[split_index:]
+    return train_df, test_df
+
+
 if __name__ == '__main__':
     df = pd.read_csv("house_prices.csv")
     X, y = df.drop("price", axis=1), df.price
 
+    # define seed for reproducibility
+    seed = 42
+
     # Question 2 - split train test
+    train_df, test_df = Q2(seed=seed)
+    
 
     # Question 3 - preprocessing of housing prices train dataset
 
