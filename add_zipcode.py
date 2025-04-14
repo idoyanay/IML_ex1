@@ -42,6 +42,10 @@ def main():
 
     # Save to new CSV
     df_with_zip.to_csv(args.output_csv, index=False)
+
+    if df_with_zip["zipcode"].isnull().any():
+        raise ValueError(f"coudn't find zipcode for row: {df_with_zip[df_with_zip['zipcode'].isnull()]}")
+    # Save the new CSV with zipcodes
     print(f"✅ Saved new CSV with zipcode column to: {args.output_csv}")
 
 if __name__ == "__main__":
