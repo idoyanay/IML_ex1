@@ -103,6 +103,7 @@ if __name__ == '__main__':
     # Question 2 - split train test
     train_df, test_df = Q2(X, y)
     
+    
 
     # Question 3 - preprocessing of housing prices train dataset
 
