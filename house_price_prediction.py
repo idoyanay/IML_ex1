@@ -57,37 +57,51 @@ def feature_evaluation(X: pd.DataFrame, y: pd.Series, output_path: str = ".") ->
 
 
 
-def Q2(seed: int = 42) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def Q2(X: pd.DataFrame, y: pd.Series, seed: int = 42) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
     """
     Split the data into train and test sets. The test set should be 20% of the data.
     Parameters
     ----------
+    X: pd.DataFrame
+        Design matrix of regression problem
+
+    y: pd.Series
+        Response vector to split
+
     seed: int
         Random seed for reproducibility
     """
+    # Set seed for reproducibility
     np.random.seed(seed)
 
-    # Shuffle the DataFrame rows
-    shuffled_df = df.sample(frac=1, random_state=42).reset_index(drop=True)
+    # Get the total number of samples
+    n_samples = X.shape[0]
 
-    # Calculate the index to split at
-    split_index = int(0.75 * len(shuffled_df))
+    # Create a shuffled array of indices
+    indices = np.random.permutation(n_samples)
 
-    # Split the DataFrame
-    train_df = shuffled_df.iloc[:split_index]
-    test_df = shuffled_df.iloc[split_index:]
-    return train_df, test_df
+    # Find the split point
+    split_point = int(0.75 * n_samples)
+
+    # Split the indices
+    train_idx = indices[:split_point]
+    test_idx = indices[split_point:]
+
+    # Use the indices to split X and y
+    X_train = X.iloc[train_idx]
+    X_test = X.iloc[test_idx]
+    y_train = y.iloc[train_idx]
+    y_test = y.iloc[test_idx]
+    return X_train, X_test, y_train, y_test
 
 
 if __name__ == '__main__':
     df = pd.read_csv("house_prices.csv")
     X, y = df.drop("price", axis=1), df.price
 
-    # define seed for reproducibility
-    seed = 42
 
     # Question 2 - split train test
-    train_df, test_df = Q2(seed=seed)
+    train_df, test_df = Q2(X, y)
     
 
     # Question 3 - preprocessing of housing prices train dataset
