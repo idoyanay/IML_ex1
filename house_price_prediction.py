@@ -291,6 +291,7 @@ def preprocess_test(X: pd.DataFrame):
     A preprocessed version of the test data that matches the coefficients format.
     """
     X_test = X.copy()
+    
     # add a zipcode column using geopy -- need to be done in preprocess test also -- 
     if ("zipcode" not in X_test.columns) and ("lat" in X_test.columns) and ("long" in X_test.columns):
         print("Adding zipcode column based on lat/long...")
