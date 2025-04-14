@@ -75,6 +75,19 @@ class LinearRegression:
         # Set fitted_ to True
         self.fitted_ = True
 
+        # Step 1: Compute the SVD of the design matrix
+        # U, Sigma, V = np.linalg.svd(X)
+        # # Step 2: Compute the pseudo-inverse of Sigma
+        # Sigma_inv = np.zeros((D, M))
+        # for i in range(len(Sigma)):
+        #     Sigma_inv[i, i] = 1 / Sigma[i]
+        # # Step 3: Compute the pseudo-inverse of the design matrix
+        # X_pseudo_inv = V.T @ Sigma_inv @ U.T
+        # # Step 4: Compute the coefficients
+        # self.coefs_ = X_pseudo_inv @ y
+        # # Set fitted_ to True
+        # self.fitted_ = True
+
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """
