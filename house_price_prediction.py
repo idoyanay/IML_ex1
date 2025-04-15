@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import os
 import pandas as pd
 import argparse
 import multiprocessing as mp
@@ -6,7 +7,7 @@ import plotly.graph_objects as go
 import numpy as np
 from typing import Tuple, NoReturn
 from geopy.geocoders import Nominatim
-geolocator = Nominatim(user_agent="zipcode-lookup")
+geolocator = Nominatim(user_agent="zipcode-lookup") 
 from sklearn.neighbors import NearestNeighbors
 
 import time
@@ -128,14 +129,19 @@ def parse_arguments() -> dict:
     """
     Parses command-line arguments for the house price prediction script.
 
-    If debug mode is enabled, an input file must be provided.
+    This function defines and processes the command-line arguments required for the script.
+    It ensures that if debug mode is enabled, an input file must be provided.
 
     Returns
     -------
     dict
-        Dictionary with:
-        - 'debug': whether debug mode is active
-        - 'input': input file path (required in debug mode)
+        Dictionary containing the parsed arguments:
+        - 'debug': bool, whether debug mode is active
+        - 'input': str or None, input file path (required in debug mode)
+        - 'feature_evaluation': bool, whether to enable feature evaluation
+        - 'zipcode': bool, whether to add zipcode to features
+        - 'first_part_only': bool, whether to run only the first part of the assignment
+        - 'first_part': bool, whether to include the first part of the assignment
     """
     parser = argparse.ArgumentParser(description="House Price Prediction CLI")
 
@@ -426,7 +432,8 @@ def feature_evaluation(X: pd.DataFrame, y: pd.Series, output_path: str = ".") ->
 
 
 
-def split_data(X: pd.DataFrame, y: pd.Series, p: int = 75, seed: int = 42) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
+
+def split_data(X: pd.DataFrame, y: pd.Series, p: int = 75) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
     """
     Split the data into train and test sets (75% train, 25% test).
     Ensures that any row with NaN in index or y, or negative 'sqft_lot15',
@@ -440,8 +447,8 @@ def split_data(X: pd.DataFrame, y: pd.Series, p: int = 75, seed: int = 42) -> Tu
     y : pd.Series
         Response vector to split
 
-    seed : int
-        Random seed for reproducibility
+    p : int
+        Percentage of training data (default 75)
 
     Returns
     -------
@@ -451,18 +458,17 @@ def split_data(X: pd.DataFrame, y: pd.Series, p: int = 75, seed: int = 42) -> Tu
         - y_train : pd.Series
         - y_test  : pd.Series
     """
+    seed = os.getpid()
+
     # Identify rows with NaN in index or y, or negative sqft_lot15
     mask = X.index.isna() | y.isna() | (X["sqft_lot15"] < 0)
 
-    # Force those into the training set
     X_nan = X[mask]
     y_nan = y[mask]
 
-    # Remaining valid rows
     X_valid = X[~mask]
     y_valid = y[~mask]
 
-    # Shuffle and split
     np.random.seed(seed)
     shuffled_indices = np.random.permutation(X_valid.shape[0])
     split_point = int((p / 100) * len(shuffled_indices))
@@ -470,7 +476,6 @@ def split_data(X: pd.DataFrame, y: pd.Series, p: int = 75, seed: int = 42) -> Tu
     train_idx = shuffled_indices[:split_point]
     test_idx = shuffled_indices[split_point:]
 
-    # Assemble final sets
     X_train = pd.concat([X_valid.iloc[train_idx], X_nan])
     y_train = pd.concat([y_valid.iloc[train_idx], y_nan])
 
@@ -478,6 +483,7 @@ def split_data(X: pd.DataFrame, y: pd.Series, p: int = 75, seed: int = 42) -> Tu
     y_test = y_valid.iloc[test_idx]
 
     return X_train, X_test, y_train, y_test
+
 
 
 def Q_2_to_4(X: pd.DataFrame, y: pd.Series, args: dict) -> NoReturn:
@@ -526,7 +532,7 @@ def Q_2_to_4(X: pd.DataFrame, y: pd.Series, args: dict) -> NoReturn:
 
 
 def run_single_experiment(args, X, y, p, i):
-    lin_reg = LinearRegression(include_intercept=True)
+    model = LinearRegression(include_intercept=True)
 
     X_train, X_test, y_train, y_test = split_data(X, y, p=p)
 
@@ -544,16 +550,6 @@ def run_single_experiment(args, X, y, p, i):
         X_test["zipcode"] = pd.to_numeric(X_test["zipcode"], errors="coerce").astype("Int64")
         X_test["zipcode"] = X_test["zipcode"].fillna(0)
 
-
-
-    # check if there is zipcode 0 or none
-    if X_test["zipcode"].isna().any():
-        raise ValueError(f"Test data has zipcode NaN values: {X_test[X_test['zipcode'].isna()]}")
-    if X_train["zipcode"].isna().any():
-        raise ValueError(f"Train data has zipcode NaN values: {X_train[X_train['zipcode'].isna()]}")
-    if X_train["zipcode"].eq(0).any():
-        raise ValueError(f"Train data has zipcode 0 values: {X_train[X_train['zipcode'] == 0]}")
-    
     X_train, y_train = preprocess_train(X_train, y_train)
 
     if args["feature_evaluation"]:
@@ -570,8 +566,8 @@ def run_single_experiment(args, X, y, p, i):
     if not X_diff.empty:
         raise ValueError(f"Test data has extra columns: {X_diff.columns.tolist()}")
 
-    lin_reg.fit(X_train, y_train)
-    return lin_reg.loss(X_test, y_test), lin_reg.var(X_test, y_test)
+    model.fit(X_train.to_numpy(), np.squeeze(y_train.to_numpy()))
+    return model.loss(X_test.to_numpy(), np.squeeze(y_test.to_numpy())), model.var(X_test.to_numpy(), np.squeeze(y_test.to_numpy()))
 
 
 
@@ -617,7 +613,6 @@ def main() -> NoReturn:
 
 
     # creating the linear regression model
-    lin_reg = LinearRegression(include_intercept=True)
 
     loss, var = np.zeros(100 - 10 + 1), np.zeros(100 - 10 + 1)
     std_loss, std_var = np.zeros(100 - 10 + 1), np.zeros(100 - 10 + 1)

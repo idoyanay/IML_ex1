@@ -54,7 +54,11 @@ class LinearRegression:
         """
         
         # assert not np.isnan(X).any(), "X contains NaNs"
-        assert np.isfinite(X.to_numpy(dtype=float, na_value=np.nan)).all(), "X contains Infs or NaNs"
+        X_copy = X.copy()
+        # convert X_copy to ndarray
+        if not isinstance(X_copy, np.ndarray):
+            X_copy = X_copy.to_numpy(dtype=float, na_value=np.nan)
+        assert np.isfinite(X_copy.all()), "X contains Infs or NaNs"
 
 
 
