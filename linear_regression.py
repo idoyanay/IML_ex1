@@ -147,6 +147,9 @@ class LinearRegression:
         """
         if not self.fitted_:
             raise ValueError("Estimator has not been fitted yet")
+        if X.size == 0 or y.size == 0:
+            return np.nan
+            
         # Step 1: Compute the predicted responses
         y_pred = self.predict(X)
         # Step 2: Compute the loss
@@ -173,6 +176,9 @@ class LinearRegression:
         """
         if not self.fitted_:
             raise ValueError("Estimator has not been fitted yet")
+
+        if X.size == 0 or y.size == 0:
+            return np.nan
         # Step 1: Compute the predicted responses
         y_pred = self.predict(X)
         # Step 2: Compute the loss

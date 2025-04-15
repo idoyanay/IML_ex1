@@ -11,24 +11,46 @@ geolocator = Nominatim(user_agent="zipcode-lookup")
 from sklearn.neighbors import NearestNeighbors
 
 import time
-
-
-def print_inf_columns(X: pd.DataFrame):
-    print("🔍 Checking for infinite values in columns...")
-    for col in X.columns:
-        if not np.issubdtype(X[col].dtype, np.number):
-            print(f"⚠️ Skipping non-numeric column: {col}")
-            continue
-        col_has_inf = np.isinf(X[col]).any()
-        if col_has_inf:
-            print(f"❌ Column '{col}' contains inf or -inf values")
-
 from linear_regression import LinearRegression
 ### ====================================== ###
 ### ========== helper functions ========== ###
 ### ====================================== ###
 
+def create_closest15_feature(X: pd.DataFrame, feature: str) -> pd.DataFrame:
+    """
+    Create a new feature '<feature>_closest15' based on the average of the 15 closest houses for the specified feature.
+    
+    Parameters
+    ----------
+    X : pd.DataFrame
+        The input DataFrame containing house features.
+    feature : str
+        The name of the feature to calculate the closest 15 average for.
+    
+    Returns
+    -------
+    pd.DataFrame
+        A modified DataFrame with the new '<feature>_closest15' feature.
+    """
+    if feature not in X.columns:
+        raise ValueError(f"Feature '{feature}' not found in DataFrame columns.")
+    
+    # Create a copy to avoid modifying the original data
+    X_copy = X.copy()
+    if X_copy.empty:
+        raise ValueError("create_closest15_feature received an empty DataFrame.")
 
+    # Fit NearestNeighbors on the data
+    knn = NearestNeighbors(n_neighbors=15)
+    knn.fit(X_copy[["lat", "long"]])  # Use geographical coordinates for proximity
+    
+    # Find the 15 nearest neighbors
+    distances, indices = knn.kneighbors(X_copy[["lat", "long"]])
+    
+    # Calculate the average of the specified feature for the closest 15 houses
+    X_copy[f"{feature}_closest15"] = np.mean(X_copy.iloc[indices.flatten()][feature].values.reshape(-1, 15), axis=1)
+    
+    return X_copy
 
 def fill_missing_zipcodes_by_proximity(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -303,8 +325,6 @@ def preprocess_train(X: pd.DataFrame, y: pd.Series) -> Tuple[pd.DataFrame, pd.Se
     
     # Example: Add a zipcode column based on lat/long -- adding this data for trying to evaluate the level of the area
 
-    
-
 
     # Remove rows with NaN index and rows with NaN price
     mask = X_clean.notna().all(axis=1) & y.notna()
@@ -334,11 +354,13 @@ def preprocess_train(X: pd.DataFrame, y: pd.Series) -> Tuple[pd.DataFrame, pd.Se
     # Handle houses sold twice by taking the average of their features and target
     X_clean, y_clean = avarge_house_prices(X_clean, y_clean)
 
+    X_clean = create_closest15_feature(X_clean, "grade")
+    X_clean = create_closest15_feature(X_clean, "view")
 
     X_clean = remove_uncoralated_features(X_clean)
+    
     #check if date in the data
-    if "date" in X_clean.columns:
-        print("date in data")
+
     
 
 
@@ -379,6 +401,9 @@ def preprocess_test(X: pd.DataFrame):
 
     # Set yr_renovated to 0 for houses where yr_built is later than yr_renovated
     X_test.loc[X_test["yr_built"] > X_test["yr_renovated"], "yr_renovated"] = 0
+
+    X_test = create_closest15_feature(X_test, "grade")
+    X_test = create_closest15_feature(X_test, "view")
 
     X_test = remove_uncoralated_features(X_test)
 
@@ -458,7 +483,7 @@ def split_data(X: pd.DataFrame, y: pd.Series, p: int = 75) -> Tuple[pd.DataFrame
         - y_train : pd.Series
         - y_test  : pd.Series
     """
-    seed = os.getpid()
+    seed = 42 # for reproducibility
 
     # Identify rows with NaN in index or y, or negative sqft_lot15
     mask = X.index.isna() | y.isna() | (X["sqft_lot15"] < 0)
@@ -530,17 +555,72 @@ def Q_2_to_4(X: pd.DataFrame, y: pd.Series, args: dict) -> NoReturn:
         feature_evaluation(X_train, y_train, output_path="feature_evaluation")
 
 
+def sample_train_set(X_train: pd.DataFrame, y_train: pd.Series, p: int) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
+        """
+        Sample a subset of the training set based on the given percentage.
 
-def run_single_experiment(args, X, y, p, i):
+        Parameters
+        ----------
+        X_train : pd.DataFrame
+            Training design matrix.
+        y_train : pd.Series
+            Training response vector.
+        p : int
+            Percentage of the training data to sample.
+
+        Returns
+        -------
+        Tuple[pd.DataFrame, pd.Series]
+            Sampled training design matrix and response vector.
+        """
+        seed = os.getpid()  # Use the process ID for the seed
+        np.random.seed(seed)  # Ensure reproducibility
+        sample_size = int((p / 100) * len(X_train))
+        sampled_indices = np.random.choice(X_train.index, size=sample_size, replace=False)
+
+        X_sampled = X_train.loc[sampled_indices]
+        y_sampled = y_train.loc[sampled_indices]
+
+        return X_sampled, y_sampled
+
+def run_single_experiment( args: dict,  X_train: pd.DataFrame,  y_train: pd.Series,  X_test: pd.DataFrame,  y_test: pd.Series,  p: int,  i: int
+                ) -> Tuple[float, float]:
+    """
+    Run a single experiment for training and evaluating a linear regression model.
+
+    Parameters
+    ----------
+    args : dict
+        Dictionary containing command-line arguments.
+    X_train : pd.DataFrame
+        Training design matrix.
+    y_train : pd.Series
+        Training response vector.
+    X_test : pd.DataFrame
+        Test design matrix.
+    y_test : pd.Series
+        Test response vector.
+    p : int
+        Percentage of training data to use.
+    i : int
+        Experiment iteration index.
+
+    Returns
+    -------
+    Tuple[float, float]
+        A tuple containing:
+        - Loss (float): The squared error loss on the test set.
+        - Variance (float): The variance of predictions on the test set.
+    """
     model = LinearRegression(include_intercept=True)
 
-    X_train, X_test, y_train, y_test = split_data(X, y, p=p)
+    X_train, y_train = sample_train_set(X_train, y_train, p=p)
 
     if args["zipcode"]:
         X_train["zipcode"] = X_train.apply(lambda x: get_zipcode(x["lat"], x["long"]), axis=1)
         X_test["zipcode"] = X_test.apply(lambda x: get_zipcode(x["lat"], x["long"]), axis=1)
 
-    # check if zipcode is a column in the data
+    # Check if zipcode is a column in the data
     if "zipcode" in X_train.columns and "zipcode" in X_test.columns:
         # Fill missing zipcodes using the zipcode of the geographically nearest neighbor - in the X_train
         X_train["zipcode"] = pd.to_numeric(X_train["zipcode"], errors="coerce").astype("Int64")
@@ -549,18 +629,9 @@ def run_single_experiment(args, X, y, p, i):
         # Fill missing zipcodes with 0 in the X_test
         X_test["zipcode"] = pd.to_numeric(X_test["zipcode"], errors="coerce").astype("Int64")
         X_test["zipcode"] = X_test["zipcode"].fillna(0)
-
-    X_train, y_train = preprocess_train(X_train, y_train)
-
-    if args["feature_evaluation"]:
-        feature_evaluation(X_train, y_train, output_path="feature_evaluation")
-
-    X_test = preprocess_test(X_test)
-
     
-    # check if there are any columns in X_test that are not in X_train
-
-
+    X_train, y_train = preprocess_train(X_train, y_train)
+    X_test = preprocess_test(X_test)
 
     X_diff = X_test[X_test.columns.difference(X_train.columns)]
     if not X_diff.empty:
@@ -617,22 +688,27 @@ def main() -> NoReturn:
     loss, var = np.zeros(100 - 10 + 1), np.zeros(100 - 10 + 1)
     std_loss, std_var = np.zeros(100 - 10 + 1), np.zeros(100 - 10 + 1)
 
+    # Define percentages for training data sizes
+    percentages = np.arange(10, 101)
+
+    X_train, X_test, y_train, y_test = split_data(X, y, p=75)
     # For every percentage p in 10%, 11%, ..., 100%, repeat the following 10 times:
-    for p in range(10, 101):
+    for p in percentages:
         print(f"\rRunning experiments for {p}% of the data...", end="")
 
         with mp.Pool(processes=mp.cpu_count()) as pool:
             results = pool.starmap(
                 run_single_experiment,
-                [(args, X, y, p, i) for i in range(10)]
+                [(args, X_train, y_train, X_test, y_test, p, i) for i in range(10)]
             )
 
         cur_loss, cur_var = zip(*results)  # unzip the results
         cur_loss, cur_var = np.array(cur_loss), np.array(cur_var)
 
         # Store average and variance of loss over test set
+        # check if some of the arrays have NaN values or have empty values
         loss[p - 10], var[p - 10], std_loss[p - 10], std_var[p - 10] = cur_loss.mean(), cur_var.mean(), cur_loss.std(), cur_var.std()
-        
+
 
     # Create the plot
     fig = go.Figure()
