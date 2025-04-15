@@ -7,12 +7,53 @@ import numpy as np
 from typing import Tuple, NoReturn
 from geopy.geocoders import Nominatim
 geolocator = Nominatim(user_agent="zipcode-lookup")
+from sklearn.neighbors import NearestNeighbors
+
 import time
+
+
+def print_inf_columns(X: pd.DataFrame):
+    print("🔍 Checking for infinite values in columns...")
+    for col in X.columns:
+        if not np.issubdtype(X[col].dtype, np.number):
+            print(f"⚠️ Skipping non-numeric column: {col}")
+            continue
+        col_has_inf = np.isinf(X[col]).any()
+        if col_has_inf:
+            print(f"❌ Column '{col}' contains inf or -inf values")
 
 from linear_regression import LinearRegression
 ### ====================================== ###
 ### ========== helper functions ========== ###
 ### ====================================== ###
+
+
+
+def fill_missing_zipcodes_by_proximity(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Fill missing zipcodes using the zipcode of the geographically nearest neighbor.
+    Requires columns: 'lat', 'long', and 'zipcode'.
+    """
+
+    known = df[df["zipcode"].notna()].copy()
+    missing = df[df["zipcode"].isna()].copy()
+
+    if missing.empty:
+        return df
+
+    # Prepare coordinates
+    known_coords = known[["lat", "long"]].to_numpy()
+    missing_coords = missing[["lat", "long"]].to_numpy()
+
+    # Fit nearest neighbor model on known ZIP code entries
+    nn = NearestNeighbors(n_neighbors=1, algorithm="ball_tree").fit(known_coords)
+    distances, indices = nn.kneighbors(missing_coords)
+
+    # Assign ZIP codes from nearest neighbors
+    nearest_zips = known["zipcode"].to_numpy()[indices[:, 0]]
+    df.loc[missing.index, "zipcode"] = nearest_zips
+    return df
+
 
 def remove_outliers(X_clean: pd.DataFrame, y_clean: pd.Series) -> Tuple[pd.DataFrame, pd.Series]:
     # remove outliers
@@ -289,6 +330,11 @@ def preprocess_train(X: pd.DataFrame, y: pd.Series) -> Tuple[pd.DataFrame, pd.Se
 
 
     X_clean = remove_uncoralated_features(X_clean)
+    #check if date in the data
+    if "date" in X_clean.columns:
+        print("date in data")
+    
+
 
     X_clean, y_clean = remove_outliers(X_clean, y_clean)
 
@@ -455,15 +501,19 @@ def Q_2_to_4(X: pd.DataFrame, y: pd.Series, args: dict) -> NoReturn:
         print("Adding zipcode column based on lat/long...")
         X_train["zipcode"] = X_train.apply(lambda x: get_zipcode(x["lat"], x["long"]), axis=1)
         X_test["zipcode"] = X_test.apply(lambda x: get_zipcode(x["lat"], x["long"]), axis=1)
-        
 
-    # checking if zipcode is a column in the data
-    if "zipcode" in X_train.columns:
-        # removing rows with NaN zipcode
-        X_train = X_train[X_train["zipcode"].notna()]
-        y_train = y_train[X_train.index]
-        # replaicing the zipcode nan with the median
-        X_test["zipcode"] = X_test["zipcode"].fillna(X_train["zipcode"].median())
+
+    # check if zipcode is a column in the data
+    if "zipcode" in X_train.columns and "zipcode" in X_test.columns:
+        # Fill missing zipcodes using the zipcode of the geographically nearest neighbor - in the X_train
+        X_train["zipcode"] = pd.to_numeric(X_train["zipcode"], errors="coerce").astype("Int64")
+        X_train = fill_missing_zipcodes_by_proximity(X_train)
+
+        # Fill missing zipcodes with 0 in the X_test
+        X_test["zipcode"] = pd.to_numeric(X_test["zipcode"], errors="coerce").astype("Int64")
+        X_test["zipcode"] = X_test["zipcode"].fillna(0)
+
+        
 
     X = X.sort_index()
     y = y.sort_index()
@@ -484,12 +534,37 @@ def run_single_experiment(args, X, y, p, i):
         X_train["zipcode"] = X_train.apply(lambda x: get_zipcode(x["lat"], x["long"]), axis=1)
         X_test["zipcode"] = X_test.apply(lambda x: get_zipcode(x["lat"], x["long"]), axis=1)
 
+    # check if zipcode is a column in the data
+    if "zipcode" in X_train.columns and "zipcode" in X_test.columns:
+        # Fill missing zipcodes using the zipcode of the geographically nearest neighbor - in the X_train
+        X_train["zipcode"] = pd.to_numeric(X_train["zipcode"], errors="coerce").astype("Int64")
+        X_train = fill_missing_zipcodes_by_proximity(X_train)
+
+        # Fill missing zipcodes with 0 in the X_test
+        X_test["zipcode"] = pd.to_numeric(X_test["zipcode"], errors="coerce").astype("Int64")
+        X_test["zipcode"] = X_test["zipcode"].fillna(0)
+
+
+
+    # check if there is zipcode 0 or none
+    if X_test["zipcode"].isna().any():
+        raise ValueError(f"Test data has zipcode NaN values: {X_test[X_test['zipcode'].isna()]}")
+    if X_train["zipcode"].isna().any():
+        raise ValueError(f"Train data has zipcode NaN values: {X_train[X_train['zipcode'].isna()]}")
+    if X_train["zipcode"].eq(0).any():
+        raise ValueError(f"Train data has zipcode 0 values: {X_train[X_train['zipcode'] == 0]}")
+    
     X_train, y_train = preprocess_train(X_train, y_train)
 
     if args["feature_evaluation"]:
         feature_evaluation(X_train, y_train, output_path="feature_evaluation")
 
     X_test = preprocess_test(X_test)
+
+    
+    # check if there are any columns in X_test that are not in X_train
+
+
 
     X_diff = X_test[X_test.columns.difference(X_train.columns)]
     if not X_diff.empty:
@@ -562,52 +637,39 @@ def main() -> NoReturn:
 
         # Store average and variance of loss over test set
         loss[p - 10], var[p - 10], std_loss[p - 10], std_var[p - 10] = cur_loss.mean(), cur_var.mean(), cur_loss.std(), cur_var.std()
-    
-    
-    
-    percentages = np.arange(10, 101)
+        
 
-    plt.figure(figsize=(10, 6))
-    plt.plot(percentages, loss, label="Average Loss", color="blue")
-    plt.fill_between(percentages, loss - 2 * std_loss, loss + 2 * std_loss, color="blue", alpha=0.2, label="Error Ribbon (±2*std)")
-    plt.xlabel("Percentage of Training Data")
-    plt.ylabel("Loss")
-    plt.title("Average Loss as a Function of Training Size")
-    plt.legend()
-    plt.grid(True)
-    plt.show()
-    plt.savefig("average_loss_plot.png")
-    # # Create the plot
-    # fig = go.Figure()
+    # Create the plot
+    fig = go.Figure()
 
-    # # Add the average loss line
-    # fig.add_trace(go.Scatter(x=percentages, y=loss, mode='lines', name='Average Loss', line=dict(color='blue')))
+    # Add the average loss line
+    fig.add_trace(go.Scatter(x=percentages, y=loss, mode='lines', name='Average Loss', line=dict(color='blue')))
 
-    # # Add the error ribbon
-    # fig.add_trace(go.Scatter(
-    #     x=np.concatenate([percentages, percentages[::-1]]),
-    #     y=np.concatenate([loss - 2 * std_loss, (loss + 2 * std_loss)[::-1]]),
-    #     fill='toself',
-    #     fillcolor='rgba(0, 0, 255, 0.2)',
-    #     line=dict(color='rgba(0,0,0,0)'),  # Ensure the ribbon has no border
-    #     hoverinfo="skip",
-    #     name='Error Ribbon (±2*std)'
-    # ))
+    # Add the error ribbon
+    fig.add_trace(go.Scatter(
+        x=np.concatenate([percentages, percentages[::-1]]),
+        y=np.concatenate([loss - 2 * std_loss, (loss + 2 * std_loss)[::-1]]),
+        fill='toself',
+        fillcolor='rgba(0, 0, 255, 0.2)',
+        line=dict(color='rgba(0,0,0,0)'),  # Ensure the ribbon has no border
+        hoverinfo="skip",
+        name='Error Ribbon (±2*std)'
+    ))
 
-    # # Update layout
-    # fig.update_layout(
-    #     title="Average Loss as a Function of Training Size",
-    #     xaxis_title="Percentage of Training Data",
-    #     yaxis_title="Loss (Squared Error)",  # Add units to the y-axis
-    #     legend=dict(x=0, y=1),
-    #     template="plotly_white"
-    # )
+    # Update layout
+    fig.update_layout(
+        title="Average Loss as a Function of Training Size",
+        xaxis_title="Percentage of Training Data",
+        yaxis_title="Loss (Squared Error)",  # Add units to the y-axis
+        legend=dict(x=0, y=1),
+        template="plotly_white"
+    )
 
-    # # Save the plot as an image
-    # fig.write_image("average_loss_plot.png")
+    # Save the plot as an image
+    fig.write_image("average_loss_plot.png")
 
-    # # Show the plot
-    # fig.show()
+    # Show the plot
+    fig.show()
 
     return
 

@@ -54,10 +54,8 @@ class LinearRegression:
         """
         
         # assert not np.isnan(X).any(), "X contains NaNs"
-        nan_cols = X.columns[X.isna().any()]
-        assert nan_cols.empty, f"X contains NaNs in columns: {list(nan_cols)}"
+        assert np.isfinite(X.to_numpy(dtype=float, na_value=np.nan)).all(), "X contains Infs or NaNs"
 
-        assert np.isfinite(X.to_numpy()).all(), "X contains Infs"
 
 
         # Determine the number of features, including intercept if applicable
