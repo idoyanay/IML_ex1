@@ -16,6 +16,55 @@ from linear_regression import LinearRegression
 ### ========== helper functions ========== ###
 ### ====================================== ###
 
+
+price_center = {} # global variable to store the distance from the price center
+
+def update_price_center(X: pd.DataFrame, y: pd.Series) -> None:
+    """
+    Calculate the price center based on latitude and longitude (weighted average).
+    
+    Parameters
+    ----------
+    X : pd.DataFrame
+        The input DataFrame containing house features.
+    y : pd.Series
+        The target variable (house prices).
+    """
+    global price_center
+    if "lat" not in X.columns or "long" not in X.columns:
+        raise ValueError("DataFrame must contain 'lat' and 'long' columns.")
+
+    # Calculate the weighted average of latitude and longitude based on house prices
+    price_center["lat"] = np.average(X["lat"], weights=y)
+    price_center["long"] = np.average(X["long"], weights=y)
+
+    
+
+def create_l2_dist_from_price_center(X: pd.DataFrame) -> pd.DataFrame:
+    """
+    Create a new feature 'l2_dist_from_price_center' based on the L2 geographic distance (based on lat and long) from the price center.
+    
+    Parameters
+    ----------
+    X : pd.DataFrame
+        The input DataFrame containing house features.
+    
+    Returns
+    -------
+    pd.DataFrame
+        A modified DataFrame with the new 'l2_dist_from_price_center' feature.
+    """
+    if "lat" not in X.columns or "long" not in X.columns:
+        raise ValueError("DataFrame must contain 'lat' and 'long' columns.")
+
+    # Compute the L2 distance from the price center
+    X["l2_dist_from_price_center"] = np.sqrt(
+        (X["lat"] - price_center["lat"]) ** 2 + (X["long"] - price_center["long"]) ** 2)
+
+    return X
+    
+    
+
 def create_closest15_feature(X: pd.DataFrame, feature: str) -> pd.DataFrame:
     """
     Create a new feature '<feature>_closest15' based on the average of the 15 closest houses for the specified feature.
@@ -25,7 +74,7 @@ def create_closest15_feature(X: pd.DataFrame, feature: str) -> pd.DataFrame:
     X : pd.DataFrame
         The input DataFrame containing house features.
     feature : str
-        The name of the feature to calculate the closest 15 average for.
+        The name of the feature to calculate the closest 15 average for. 
     
     Returns
     -------
@@ -88,20 +137,7 @@ def remove_outliers(X_clean: pd.DataFrame, y_clean: pd.Series) -> Tuple[pd.DataF
     return X_clean, y_clean
 
 
-def remove_uncoralated_features(X_clean: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
-    # remove the column 'waterfront'
-    X_clean = X_clean.drop(columns=["waterfront"], errors="ignore").copy()
-    X_clean = X_clean.drop(columns=["date"], errors="ignore").copy()
 
-    X_clean = X_clean.drop(columns=["condition"], errors="ignore").copy()
-    X_clean = X_clean.drop(columns=["sqft_lot15"], errors="ignore").copy()
-    X_clean = X_clean.drop(columns=["long"], errors="ignore").copy()
-    X_clean = X_clean.drop(columns=["sqft_lot"], errors="ignore").copy()
-    X_clean = X_clean.drop(columns=["yr_built"], errors="ignore").copy()
-    X_clean = X_clean.drop(columns=["yr_renovated"], errors="ignore").copy()
-
-    # remove the column 'view'
-    return X_clean    
 
 
 
@@ -173,6 +209,8 @@ def parse_arguments() -> dict:
     parser.add_argument( "-f", "--first_part_only", action="store_true", help="Run only the first part of the assignment")
     parser.add_argument( "-nf", "--no_feature_evaluation", action="store_true", help="Disable feature evaluation")
     parser.add_argument( "-i", "--input", type=str, help="Path to input CSV file (required in debug mode)")
+    
+    parser.add_argument( "-t", "--title", type=str, help="Title of the avarge loss plot (optional)")
 
     args = parser.parse_args()
 
@@ -187,7 +225,9 @@ def parse_arguments() -> dict:
         "feature_evaluation": features_evaluation,
         "zipcode": args.zipcode,
         "first_part_only": args.first_part_only,
-        "first_part": not args.without_first_part
+        "first_part": not args.without_first_part,
+        "title": args.title
+
 
     }
 
@@ -245,6 +285,32 @@ def avarge_house_prices(X_clean: pd.DataFrame, y_clean: pd.Series) -> Tuple[pd.D
 
 
     return X_clean, y_clean
+
+def convert_date_to_months(X_clean: pd.DataFrame) -> pd.DataFrame:
+    """
+    Convert the 'date' column in the DataFrame to a new feature representing months since the first sale.
+
+    Parameters
+    ----------
+    X_clean : pd.DataFrame
+        The input DataFrame containing a 'date' column.
+
+    Returns
+    -------
+    pd.DataFrame
+        A modified DataFrame with a new 'months_since_first_sale' column and the original 'date' column removed.
+    """
+    X_clean["date"] = pd.to_datetime(X_clean["date"], format="%Y%m%dT%H%M%S", errors="coerce")
+
+    X_clean["date"] = (
+        ((X_clean["date"] - X_clean["date"].min()) / np.timedelta64(1, 'm'))
+    )
+
+    # Fill NaNs with the median
+    median_months = X_clean["date"].median()
+    X_clean["date"] = X_clean["date"].fillna(median_months).astype(int)
+
+    return X_clean
 
 
 def remove_small_living_area(X_clean: pd.DataFrame, y_clean: pd.Series) -> Tuple[pd.DataFrame, pd.Series]:
@@ -341,9 +407,12 @@ def preprocess_train(X: pd.DataFrame, y: pd.Series) -> Tuple[pd.DataFrame, pd.Se
     
     # Convert the 'date' column to a new feature representing months since the first sale -- need to be done in preprocess test also --
     
+    update_price_center(X_clean, y_clean)
+    X_clean = create_l2_dist_from_price_center(X_clean)
 
     # Set yr_renovated to 0 for houses where yr_built is later than yr_renovated
     X_clean.loc[X_clean["yr_built"] > X_clean["yr_renovated"], "yr_renovated"] = 0
+    X_clean = convert_date_to_months(X_clean)
     
 
     
@@ -356,8 +425,7 @@ def preprocess_train(X: pd.DataFrame, y: pd.Series) -> Tuple[pd.DataFrame, pd.Se
 
     X_clean = create_closest15_feature(X_clean, "grade")
     X_clean = create_closest15_feature(X_clean, "view")
-
-    X_clean = remove_uncoralated_features(X_clean)
+    
     
     #check if date in the data
 
@@ -401,11 +469,11 @@ def preprocess_test(X: pd.DataFrame):
 
     # Set yr_renovated to 0 for houses where yr_built is later than yr_renovated
     X_test.loc[X_test["yr_built"] > X_test["yr_renovated"], "yr_renovated"] = 0
-
+    X_test = convert_date_to_months(X_test)
     X_test = create_closest15_feature(X_test, "grade")
     X_test = create_closest15_feature(X_test, "view")
+    X_test = create_l2_dist_from_price_center(X_test)
 
-    X_test = remove_uncoralated_features(X_test)
 
     X_test.sort_index(inplace=True)
     return X_test
@@ -727,17 +795,24 @@ def main() -> NoReturn:
         name='Error Ribbon (±2*std)'
     ))
 
+    title = "Average Loss" if not args["title"] else args["title"]
     # Update layout
     fig.update_layout(
-        title="Average Loss as a Function of Training Size",
+        title=title + " as a Function of Training Size",
         xaxis_title="Percentage of Training Data",
         yaxis_title="Loss (Squared Error)",  # Add units to the y-axis
         legend=dict(x=0, y=1),
-        template="plotly_white"
+        template="plotly_white",
+        yaxis=dict(
+            type="log",  # Use logarithmic scale
+            title="Loss (e^scale)",  # Update y-axis title
+            exponentformat="e"  # Format exponents as e^x
+        )
     )
 
     # Save the plot as an image
-    fig.write_image("average_loss_plot.png")
+    
+    fig.write_image(title + ".png")
 
     # Show the plot
     fig.show()
