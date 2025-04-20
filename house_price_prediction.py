@@ -15,54 +15,6 @@ from linear_regression import LinearRegression
 ### ====================================== ###
 ### ========== helper functions ========== ###
 ### ====================================== ###
-
-
-price_center = {} # global variable to store the distance from the price center
-
-def update_price_center(X: pd.DataFrame, y: pd.Series) -> None:
-    """
-    Calculate the price center based on latitude and longitude (weighted average).
-    
-    Parameters
-    ----------
-    X : pd.DataFrame
-        The input DataFrame containing house features.
-    y : pd.Series
-        The target variable (house prices).
-    """
-    global price_center
-    if "lat" not in X.columns or "long" not in X.columns:
-        raise ValueError("DataFrame must contain 'lat' and 'long' columns.")
-
-    # Calculate the weighted average of latitude and longitude based on house prices
-    price_center["lat"] = np.average(X["lat"], weights=y)
-    price_center["long"] = np.average(X["long"], weights=y)
-
-    
-
-def create_l2_dist_from_price_center(X: pd.DataFrame) -> pd.DataFrame:
-    """
-    Create a new feature 'l2_dist_from_price_center' based on the L2 geographic distance (based on lat and long) from the price center.
-    
-    Parameters
-    ----------
-    X : pd.DataFrame
-        The input DataFrame containing house features.
-    
-    Returns
-    -------
-    pd.DataFrame
-        A modified DataFrame with the new 'l2_dist_from_price_center' feature.
-    """
-    if "lat" not in X.columns or "long" not in X.columns:
-        raise ValueError("DataFrame must contain 'lat' and 'long' columns.")
-
-    # Compute the L2 distance from the price center
-    X["l2_dist_from_price_center"] = np.sqrt(
-        (X["lat"] - price_center["lat"]) ** 2 + (X["long"] - price_center["long"]) ** 2)
-
-    return X
-    
     
 
 def create_closest15_feature(X: pd.DataFrame, feature: str) -> pd.DataFrame:
@@ -85,102 +37,20 @@ def create_closest15_feature(X: pd.DataFrame, feature: str) -> pd.DataFrame:
         raise ValueError(f"Feature '{feature}' not found in DataFrame columns.")
     
     # Create a copy to avoid modifying the original data
-    X_copy = X.copy()
-    if X_copy.empty:
+    if X.empty:
         raise ValueError("create_closest15_feature received an empty DataFrame.")
 
     # Fit NearestNeighbors on the data
     knn = NearestNeighbors(n_neighbors=15)
-    knn.fit(X_copy[["lat", "long"]])  # Use geographical coordinates for proximity
+    knn.fit(X[["lat", "long"]])  # Use geographical coordinates for proximity
     
     # Find the 15 nearest neighbors
-    distances, indices = knn.kneighbors(X_copy[["lat", "long"]])
+    distances, indices = knn.kneighbors(X[["lat", "long"]])
     
     # Calculate the average of the specified feature for the closest 15 houses
-    X_copy[f"{feature}_closest15"] = np.mean(X_copy.iloc[indices.flatten()][feature].values.reshape(-1, 15), axis=1)
+    X[f"{feature}_closest15"] = np.mean(X.iloc[indices.flatten()][feature].values.reshape(-1, 15), axis=1)
     
-    return X_copy
-
-def fill_missing_zipcodes_by_proximity(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Fill missing zipcodes using the zipcode of the geographically nearest neighbor.
-    Requires columns: 'lat', 'long', and 'zipcode'.
-    """
-
-    known = df[df["zipcode"].notna()].copy()
-    missing = df[df["zipcode"].isna()].copy()
-
-    if missing.empty:
-        return df
-
-    # Prepare coordinates
-    known_coords = known[["lat", "long"]].to_numpy()
-    missing_coords = missing[["lat", "long"]].to_numpy()
-
-    # Fit nearest neighbor model on known ZIP code entries
-    nn = NearestNeighbors(n_neighbors=1, algorithm="ball_tree").fit(known_coords)
-    distances, indices = nn.kneighbors(missing_coords)
-
-    # Assign ZIP codes from nearest neighbors
-    nearest_zips = known["zipcode"].to_numpy()[indices[:, 0]]
-    df.loc[missing.index, "zipcode"] = nearest_zips
-    return df
-
-
-def remove_outliers(X_clean: pd.DataFrame, y_clean: pd.Series) -> Tuple[pd.DataFrame, pd.Series]:
-    # remove outliers
-    threshold = 6e+6 # arbitrary threshold decided by looking at the data
-    y_outliers_indexs = y_clean[(y_clean > threshold)].index
-    # remove the outliers from the data
-    X_clean = X_clean.drop(index=y_outliers_indexs).copy()
-    y_clean = y_clean.drop(index=y_outliers_indexs).copy()
-    return X_clean, y_clean
-
-
-
-
-
-
-
-def convert_data_to_months(X_clean: pd.DataFrame) -> pd.DataFrame:
-    """
-    Convert the 'date' column in the DataFrame to a new feature representing months since the first sale.
-
-    Parameters
-    ----------
-    X_clean : pd.DataFrame
-        The input DataFrame containing a 'date' column.
-
-    Returns
-    -------
-    pd.DataFrame
-        A modified DataFrame with a new 'months_since_first_sale' column and the original 'date' column removed.
-    """
-    X_clean["date"] = pd.to_datetime(X_clean["date"], format="%Y%m%dT%H%M%S", errors="coerce")
-
-    X_clean["months_since_first_sale"] = (
-        ((X_clean["date"] - X_clean["date"].min()) / np.timedelta64(1, 'm'))
-    )
-
-    # Fill NaNs with the median
-    median_months = X_clean["months_since_first_sale"].median()
-    X_clean["months_since_first_sale"] = X_clean["months_since_first_sale"].fillna(median_months).astype(int)
-
-    # Drop original string-based date column
-    X_clean = X_clean.drop(columns="date")
-    return X_clean
-
-
-def get_zipcode(lat: float, long: float) -> int:
-    try:
-        location = geolocator.reverse((lat, long), exactly_one=True, timeout=10)
-        zipcode = location.raw["address"].get("postcode", None)
-        print(f"Fetched zipcode for ({lat}, {long}): {zipcode}")
-        time.sleep(1)  # Be respectful to the free service
-        return int(zipcode) if zipcode and zipcode.isdigit() else None
-    except Exception as e:
-        print(f"Failed for ({lat}, {long}): {e}")
-        return None
+    return X
 
 
 def parse_arguments() -> dict:
@@ -203,27 +73,16 @@ def parse_arguments() -> dict:
     """
     parser = argparse.ArgumentParser(description="House Price Prediction CLI")
 
-    parser.add_argument( "-d", "--debug", action="store_true", help="Enable debug mode (requires --input)")
-    parser.add_argument( "-z", "--zipcode", action="store_true", help="add zipcode to features")
     parser.add_argument( "-w", "--without_first_part", action="store_true", help="Run without the first part of the assignment")
     parser.add_argument( "-f", "--first_part_only", action="store_true", help="Run only the first part of the assignment")
-    parser.add_argument( "-nf", "--no_feature_evaluation", action="store_true", help="Disable feature evaluation")
-    parser.add_argument( "-i", "--input", type=str, help="Path to input CSV file (required in debug mode)")
-    
+    parser.add_argument( "-nf", "--no_feature_evaluation", action="store_true", help="Disable feature evaluation")    
     parser.add_argument( "-t", "--title", type=str, help="Title of the avarge loss plot (optional)")
-
     args = parser.parse_args()
 
-    # Enforce: if debug is active, input is required
-    if args.debug and not args.input:
-        parser.error("--debug requires --input to be specified")
 
     features_evaluation = not args.no_feature_evaluation
-    return {
-        "debug": args.debug,
-        "input": args.input, 
+    return { 
         "feature_evaluation": features_evaluation,
-        "zipcode": args.zipcode,
         "first_part_only": args.first_part_only,
         "first_part": not args.without_first_part,
         "title": args.title
@@ -255,8 +114,8 @@ def avarge_house_prices(X_clean: pd.DataFrame, y_clean: pd.Series) -> Tuple[pd.D
     7. Optional: sort
     8. Return the cleaned X and y
     """
+
     # Step 1: Identify duplicate houses by index (e.g., id)
-# Step 1: Identify duplicate houses by index (e.g., id)
     duplicate_indices = X_clean.index[X_clean.index.duplicated(keep=False)]
 
     if not duplicate_indices.empty:
@@ -268,49 +127,16 @@ def avarge_house_prices(X_clean: pd.DataFrame, y_clean: pd.Series) -> Tuple[pd.D
         grouped_X = duplicates_X.groupby(duplicates_X.index).first()
         grouped_y = duplicates_y.groupby(duplicates_y.index).mean()
 
-        
-
         # Step 4: Remove all duplicate rows from original data
         X_clean = X_clean.drop(index=duplicate_indices)
         y_clean = y_clean.drop(index=duplicate_indices)
-
 
         # Step 5: Add back the grouped/cleaned duplicates
         X_clean = pd.concat([X_clean, grouped_X])
         y_clean = pd.concat([y_clean, grouped_y])
 
-        # Optional: sort to maintain order by index
-        X_clean = X_clean.sort_index()
-        y_clean = y_clean.sort_index()
-
-
     return X_clean, y_clean
 
-def convert_date_to_months(X_clean: pd.DataFrame) -> pd.DataFrame:
-    """
-    Convert the 'date' column in the DataFrame to a new feature representing months since the first sale.
-
-    Parameters
-    ----------
-    X_clean : pd.DataFrame
-        The input DataFrame containing a 'date' column.
-
-    Returns
-    -------
-    pd.DataFrame
-        A modified DataFrame with a new 'months_since_first_sale' column and the original 'date' column removed.
-    """
-    X_clean["date"] = pd.to_datetime(X_clean["date"], format="%Y%m%dT%H%M%S", errors="coerce")
-
-    X_clean["date"] = (
-        ((X_clean["date"] - X_clean["date"].min()) / np.timedelta64(1, 'm'))
-    )
-
-    # Fill NaNs with the median
-    median_months = X_clean["date"].median()
-    X_clean["date"] = X_clean["date"].fillna(median_months).astype(int)
-
-    return X_clean
 
 
 def remove_small_living_area(X_clean: pd.DataFrame, y_clean: pd.Series) -> Tuple[pd.DataFrame, pd.Series]:
@@ -335,40 +161,79 @@ def remove_small_living_area(X_clean: pd.DataFrame, y_clean: pd.Series) -> Tuple
 
     
     # Step 1: Remove invalid entries
-    mask = (
-    (X_clean["bedrooms"] > 0) &
-    (X_clean["bathrooms"] > 0) &
-    X_clean.notna().all(axis=1) &
-    y_clean.notna()
-    )
+    mask = ( (X_clean["bedrooms"] > 0) & (X_clean["bathrooms"] > 0) & X_clean.notna().all(axis=1) & y_clean.notna() )
 
-    X_clean = X_clean.loc[mask].copy()
-    y_clean = y_clean.loc[mask].copy()
+    X_clean = X_clean.loc[mask]
+    y_clean = y_clean.loc[mask]
     
-
-    
-
     # Step 2: Calculate avg room area
-    avg_room_area = (
-        X_clean["sqft_living"]
-        - (X_clean["bathrooms"] * bathroom_area)
-        - base_area
-    ) / X_clean["bedrooms"]
-    
-
+    avg_room_area = ( X_clean["sqft_living"] - (X_clean["bathrooms"] * bathroom_area) - base_area) / X_clean["bedrooms"]
     
     # Step 3: Remove rows with small bedrooms
     small_living = avg_room_area < min_bedroom_area
     mask = ~small_living  # Keep only rows with avg_room_area >= min_bedroom_area
 
     # Apply the mask consistently
-    X_clean = X_clean.loc[mask].copy()
-    y_clean = y_clean.loc[mask].copy()
-
-    
+    X_clean = X_clean.loc[mask]
+    y_clean = y_clean.loc[mask]
 
     return X_clean, y_clean
+def remove_unvalid_lines(X_clean: pd.DataFrame, y_clean: pd.Series) -> Tuple[pd.DataFrame, pd.Series]:
+    """
+    Remove rows with NaN index and rows with NaN price
+    Parameters
+    ----------
+    X_clean : pd.DataFrame
+        The loaded design matrix.
+    y_clean : pd.Series
+        The corresponding response vector.
 
+    Returns
+    -------
+    Tuple[pd.DataFrame, pd.Series]
+        A clean, preprocessed version of the data.
+    """
+    
+    mask = X_clean.notna().all(axis=1) & y_clean.notna()
+    X_clean = X_clean[mask]
+    y_clean = y_clean[mask]
+    
+    # make sure that the sqft_lot15 is positive - one value seems to be negative, probably a typo
+    mask_sqft_lot15 = X_clean["sqft_lot15"] > 0
+    X_clean = X_clean[mask_sqft_lot15]
+    y_clean = y_clean[mask_sqft_lot15]
+
+    mask_renovated = X_clean["yr_renovated"] <= X_clean["yr_built"]
+    X_clean = X_clean[mask_renovated]
+    y_clean = y_clean[mask_renovated]
+
+
+    mask_bedrooms_bathroms = (X_clean["bedrooms"] > 0) & (X_clean["bathrooms"] > 0)
+    X_clean = X_clean[mask_bedrooms_bathroms]
+    y_clean = y_clean[mask_bedrooms_bathroms]
+
+
+    mask_floors = X_clean["floors"] > 0
+    X_clean = X_clean[mask_floors]
+    y_clean = y_clean[mask_floors]
+
+    mask_sqft_living = X_clean["sqft_living"] > 0
+    X_clean = X_clean[mask_sqft_living]
+    y_clean = y_clean[mask_sqft_living]
+
+    X_clean, y_clean = remove_small_living_area(X_clean, y_clean)
+
+    
+    return X_clean, y_clean
+
+
+
+
+
+
+## ====================================== ##
+## ========== main function ========== ###
+## ====================================== ##
 
 def preprocess_train(X: pd.DataFrame, y: pd.Series) -> Tuple[pd.DataFrame, pd.Series]:
     """
@@ -388,70 +253,47 @@ def preprocess_train(X: pd.DataFrame, y: pd.Series) -> Tuple[pd.DataFrame, pd.Se
 
     X_clean = X.copy()
     y_clean = y.copy()
-    
-    # Example: Add a zipcode column based on lat/long -- adding this data for trying to evaluate the level of the area
 
 
     # Remove rows with NaN index and rows with NaN price
-    mask = X_clean.notna().all(axis=1) & y.notna()
-    X_clean = X_clean[mask]
-    y_clean = y_clean[mask]
-
-
-    
-    # make sure that the sqft_lot15 is positive - one value seems to be negative, probably a typo
-    X_clean.loc[X_clean["sqft_lot15"] < 0, "sqft_lot15"] = (
-        X_clean.loc[X_clean["sqft_lot15"] < 0, "sqft_lot15"].abs()
-    )
-
-    
-    # Convert the 'date' column to a new feature representing months since the first sale -- need to be done in preprocess test also --
-    
-    update_price_center(X_clean, y_clean)
-    X_clean = create_l2_dist_from_price_center(X_clean)
-
-    # Set yr_renovated to 0 for houses where yr_built is later than yr_renovated
-    X_clean.loc[X_clean["yr_built"] > X_clean["yr_renovated"], "yr_renovated"] = 0
-    X_clean = convert_date_to_months(X_clean)
-    
-
-    
-    
-    # remove houses with unrealistically small living room size 
-    X_clean, y_clean = remove_small_living_area(X_clean, y_clean)
+    X_clean, y_clean = remove_unvalid_lines(X_clean, y_clean)
 
     # Handle houses sold twice by taking the average of their features and target
     X_clean, y_clean = avarge_house_prices(X_clean, y_clean)
 
     X_clean = create_closest15_feature(X_clean, "grade")
     X_clean = create_closest15_feature(X_clean, "view")
-    
-    
-    #check if date in the data
+    X_clean = create_closest15_feature(X_clean, "waterfront")
 
-    
-
-
-    X_clean, y_clean = remove_outliers(X_clean, y_clean)
-
-    
-
-    X = X.sort_index()
-    y = y.sort_index()
-    
+    # remove the date column from the data
+    X_clean = X_clean.drop(columns=["date"])
+    X_clean = X_clean.drop(columns=["yr_renovated"]) # this column is with 0 coralation with the price, so removing for simplicity
     
     return X_clean, y_clean
 
+def null_unvalid_lines(X: pd.DataFrame) -> pd.DataFrame:
+    """
+    Set the values of the columns to 0 for the rows that are invalid.
+    Parameters
+    ----------
+    X: pd.DataFrame
+        the loaded data
 
+    Returns
+    -------
+    A preprocessed version of the test data that matches the coefficients format.
+    """
+    
+    # Set yr_renovated to 0 for houses where yr_built is later than yr_renovated -- can't remove lines, so make them valid
+    X.loc[X["sqft_lot15"] < 0, "sqft_lot15"] = 0
+    X.loc[X["yr_renovated"] > X["yr_built"], "yr_renovated"] = 0
+    X.loc[X["bedrooms"] < 0, "bedrooms"] = 0
+    X.loc[X["bathrooms"] < 0, "bathrooms"] = 0
+    X.loc[X["floors"] < 0, "floors"] = 0
+    X.loc[X["sqft_living"] < 0, "sqft_living"] = 0
 
-
-
-## ====================================== ##
-## ========== main function ========== ###
-## ====================================== ##
-
-
-        
+    
+    return X
 def preprocess_test(X: pd.DataFrame):
     """
     preprocess test data. You are not allowed to remove rows from X, but only edit its columns.
@@ -467,12 +309,17 @@ def preprocess_test(X: pd.DataFrame):
     X_test = X.copy()
 
 
-    # Set yr_renovated to 0 for houses where yr_built is later than yr_renovated
-    X_test.loc[X_test["yr_built"] > X_test["yr_renovated"], "yr_renovated"] = 0
-    X_test = convert_date_to_months(X_test)
+    # Set yr_renovated to 0 for houses where yr_built is later than yr_renovated -- can't remove lines, so make them valid
+    X_test = null_unvalid_lines(X_test)
+    
+    
     X_test = create_closest15_feature(X_test, "grade")
     X_test = create_closest15_feature(X_test, "view")
-    X_test = create_l2_dist_from_price_center(X_test)
+    X_test = create_closest15_feature(X_test, "waterfront")
+
+    # remove the date column from the data
+    X_test = X_test.drop(columns=["date"])
+    X_test = X_test.drop(columns=["yr_renovated"]) # this column is with 0 coralation with the price, so removing for simplicity
 
 
     X_test.sort_index(inplace=True)
@@ -595,28 +442,7 @@ def Q_2_to_4(X: pd.DataFrame, y: pd.Series, args: dict) -> NoReturn:
     args : dict
         Dictionary containing command-line arguments.
     """
-    X_train, X_test, y_train, y_test = split_data(X, y, p=75)
-    if args["zipcode"]:
-        print("Adding zipcode column based on lat/long...")
-        X_train["zipcode"] = X_train.apply(lambda x: get_zipcode(x["lat"], x["long"]), axis=1)
-        X_test["zipcode"] = X_test.apply(lambda x: get_zipcode(x["lat"], x["long"]), axis=1)
-
-
-    # check if zipcode is a column in the data
-    if "zipcode" in X_train.columns and "zipcode" in X_test.columns:
-        # Fill missing zipcodes using the zipcode of the geographically nearest neighbor - in the X_train
-        X_train["zipcode"] = pd.to_numeric(X_train["zipcode"], errors="coerce").astype("Int64")
-        X_train = fill_missing_zipcodes_by_proximity(X_train)
-
-        # Fill missing zipcodes with 0 in the X_test
-        X_test["zipcode"] = pd.to_numeric(X_test["zipcode"], errors="coerce").astype("Int64")
-        X_test["zipcode"] = X_test["zipcode"].fillna(0)
-
-        
-
-    X = X.sort_index()
-    y = y.sort_index()
-    
+    X_train, _, y_train, _ = split_data(X, y, p=75)
     X_train, y_train = preprocess_train(X_train, y_train)
 
     if args["feature_evaluation"]:
@@ -681,24 +507,11 @@ def run_single_experiment( args: dict,  X_train: pd.DataFrame,  y_train: pd.Seri
         - Variance (float): The variance of predictions on the test set.
     """
     model = LinearRegression(include_intercept=True)
-
+    
     X_train, y_train = sample_train_set(X_train, y_train, p=p)
-
-    if args["zipcode"]:
-        X_train["zipcode"] = X_train.apply(lambda x: get_zipcode(x["lat"], x["long"]), axis=1)
-        X_test["zipcode"] = X_test.apply(lambda x: get_zipcode(x["lat"], x["long"]), axis=1)
-
-    # Check if zipcode is a column in the data
-    if "zipcode" in X_train.columns and "zipcode" in X_test.columns:
-        # Fill missing zipcodes using the zipcode of the geographically nearest neighbor - in the X_train
-        X_train["zipcode"] = pd.to_numeric(X_train["zipcode"], errors="coerce").astype("Int64")
-        X_train = fill_missing_zipcodes_by_proximity(X_train)
-
-        # Fill missing zipcodes with 0 in the X_test
-        X_test["zipcode"] = pd.to_numeric(X_test["zipcode"], errors="coerce").astype("Int64")
-        X_test["zipcode"] = X_test["zipcode"].fillna(0)
     
     X_train, y_train = preprocess_train(X_train, y_train)
+    
     X_test = preprocess_test(X_test)
 
     X_diff = X_test[X_test.columns.difference(X_train.columns)]
@@ -722,23 +535,15 @@ def main() -> NoReturn:
     # Load data
     args = parse_arguments()
 
-    if args["debug"]:
-        csv_path = args["input"]
-        print(f"⚠️ Debug mode enabled - using {csv_path}")
-    else:
-        csv_path = "house_prices.csv"
 
-    df = pd.read_csv(csv_path)
-    print(f"✅ Loaded data from {csv_path}")
+    df = pd.read_csv("house_prices.csv")
+    print(f"✅ Loaded data from {"house_prices.csv"}")
 
-
+    
     X, y = df.drop("price", axis=1), df.price
     X = X.set_index("id")
     y.index = X.index  # keep them in sync
 
-    # sort the dataframes by index
-    X = X.sort_index()
-    y = y.sort_index()
 
 
     # implement the Q2 to Q4
@@ -761,6 +566,7 @@ def main() -> NoReturn:
 
     X_train, X_test, y_train, y_test = split_data(X, y, p=75)
     # For every percentage p in 10%, 11%, ..., 100%, repeat the following 10 times:
+    
     for p in percentages:
         print(f"\rRunning experiments for {p}% of the data...", end="")
 

@@ -216,30 +216,32 @@ def explore_different_k(Temp: pd.DataFrame) -> NoReturn:
     loss_k = np.zeros(upper_bound)
     for k in range(1, upper_bound + 1):
         # Fit the model
+
+
         model = PolynomialFitting(k=k)
-        model.fit(X_train.to_numpy(), y_train.to_numpy().flatten())
+        model.fit(X_train.to_numpy(), y_train.to_numpy())
 
         # Evaluate the model
 
-        loss_k[k-1] = round(model.loss(X_test.to_numpy(), y_test.to_numpy().flatten()), 2)
+        loss_k[k-1] = round(model.loss(X_test.to_numpy(), y_test.to_numpy()), 2)
 
-    # Plot the loss for different k values
-    fig = px.line(
+    fig = px.bar(
         x=np.arange(1, upper_bound + 1),
         y=loss_k,
         title="Loss for different k values",
         labels={"x": "k", "y": "Loss"},
-        markers=True
     )
-    fig.update_traces(marker=dict(size=10))
+
     fig.update_layout(
         xaxis_title="k",
         yaxis_title="Loss",
         title_x=0.5,
         title_y=0.95
     )
+
     fig.show()
     fig.write_image("loss_for_different_k.png")
+
     
     # print the loss for each k value
     for k, loss in enumerate(loss_k, start=1):
@@ -342,8 +344,6 @@ def check_israel_model_on_others(Temp:  pd.DataFrame, k: int) -> NoReturn:
     )
     fig.write_image("loss_by_country.png")
     fig.show()
-    # save plot as png
-    fig.write_image("loss_by_country.png")
     
 
 if __name__ == '__main__':
